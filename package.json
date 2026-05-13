@@ -1,0 +1,31 @@
+{
+  "name": "reels-lyrics-finder",
+  "version": "1.0.0",
+  "description": "Tamil Reels Lyrics Finder and Sync App",
+  "main": "main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && electron-builder",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "html2canvas": "^1.4.1",
+    "pixelmatch": "^7.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.1.4"
+  },
+  "build": {
+    "appId": "com.reelslyrics.app",
+    "mac": {
+      "target": "dmg"
+    }
+  }
+}

@@ -88,12 +88,12 @@ ipcMain.handle('finish-render', async (event, videoPath, tempDir, fps, vWidth, v
           `-framerate ${fps}`
         ])
         .complexFilter([
-          `[1:v]scale=${vWidth}:${vHeight}[ov]`,
+          `[1:v]scale=${vWidth}:${vHeight}:flags=lanczos[ov]`,
           '[0:v][ov]overlay=0:0'
         ])
         .outputOptions([
           '-c:v libx264',
-          '-crf 18',       // Visually lossless quality
+          '-crf 14',       // Visually lossless quality
           '-preset slow',  // Better compression efficiency
           '-pix_fmt yuv420p', // Maximum compatibility
           '-c:a copy' 

@@ -27,6 +27,7 @@ function App() {
   const [highlightColor, setHighlightColor] = useState('#ffff00');
   const [placement, setPlacement] = useState('pos-bottom'); 
   const [animationStyle, setAnimationStyle] = useState('Karaoke');
+  const [exportFps, setExportFps] = useState(60);
   
   const videoRef = useRef(null);
 
@@ -158,7 +159,7 @@ function App() {
       // Hide video during capture to get transparent background
       videoRef.current.style.opacity = '0';
       
-      const FPS = 60;
+      const FPS = exportFps;
       const duration = videoRef.current.duration;
       const totalFrames = Math.floor(duration * FPS);
 
@@ -184,6 +185,7 @@ function App() {
           return time >= start && time < end;
         });
         setActiveLyricIndex(activeIdx);
+        setCurrentTime(time);
         
         // Wait for React to render the DOM update
         await new Promise(r => setTimeout(r, 50)); 
@@ -491,6 +493,15 @@ function App() {
             <select style={{ flex: 1, padding: '5px' }} value={animationStyle} onChange={e => setAnimationStyle(e.target.value)}>
               <option value="None">None</option>
               <option value="Karaoke">Karaoke (Highlight)</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <label style={{ width: '80px', fontSize: '14px', color: '#ff9800' }}>Export FPS:</label>
+            <select style={{ flex: 1, padding: '5px' }} value={exportFps} onChange={e => setExportFps(parseInt(e.target.value))}>
+              <option value="30">30 Hz</option>
+              <option value="60">60 Hz</option>
+              <option value="75">75 Hz</option>
+              <option value="120">120 Hz</option>
             </select>
           </div>
         </div>

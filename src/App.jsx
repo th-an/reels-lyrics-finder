@@ -721,31 +721,63 @@ function App() {
             </select>
           </div>
 
-          {animationStyle === 'Karaoke Wave' && (
-            <div style={{ padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <strong style={{ fontSize: '14px' }}>🌊 Animation Studio</strong>
-              
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <label style={{ width: '80px', fontSize: '12px' }}>Target:</label>
-                <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={waveTarget} onChange={e => setWaveTarget(e.target.value)}>
-                  <option value="Word">Whole Word (Smooth & No Tearing)</option>
-                  <option value="Letter">By Letter (May tear complex ligatures)</option>
-                </select>
-              </div>
+          {animationStyle === 'Karaoke Wave' && (() => {
+            const WAVE_PRESETS = [
+              { name: '1. Heavenly Float (Smoothest)', target: 'Word', amp: 10, smooth: 1.0 },
+              { name: '2. Gentle Breathe', target: 'Word', amp: 15, smooth: 0.8 },
+              { name: '3. Soft Ripple', target: 'Word', amp: 20, smooth: 0.6 },
+              { name: '4. Rhythmic Bounce', target: 'Word', amp: 25, smooth: 0.4 },
+              { name: '5. Standard Pop', target: 'Word', amp: 30, smooth: 0.3 },
+              { name: '6. Snappy Jump', target: 'Word', amp: 35, smooth: 0.2 },
+              { name: '7. Aggressive Kick', target: 'Word', amp: 40, smooth: 0.15 },
+              { name: '8. Hardcore Stomp (Hardest)', target: 'Word', amp: 50, smooth: 0.1 },
+              { name: '9. Letter Ripple (Tears Text)', target: 'Letter', amp: 15, smooth: 0.3 },
+              { name: '10. Chaotic Tremor (Tears Text)', target: 'Letter', amp: 30, smooth: 0.1 }
+            ];
+            
+            const currentPresetName = WAVE_PRESETS.find(p => p.target === waveTarget && p.amp === waveAmplitude && p.smooth === waveSmoothness)?.name || 'Custom';
 
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <label style={{ width: '80px', fontSize: '12px' }}>Amplitude:</label>
-                <input type="range" min="0" max="50" value={waveAmplitude} onChange={e => setWaveAmplitude(Number(e.target.value))} style={{ flex: 1 }} />
-                <span style={{ fontSize: '12px', width: '30px' }}>{waveAmplitude}px</span>
-              </div>
+            return (
+              <div style={{ padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <strong style={{ fontSize: '14px' }}>🌊 Animation Studio</strong>
+                
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <label style={{ width: '80px', fontSize: '12px', color: '#00e5ff' }}>Preset:</label>
+                  <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={currentPresetName} onChange={e => {
+                    const p = WAVE_PRESETS.find(pr => pr.name === e.target.value);
+                    if (p) {
+                      setWaveTarget(p.target);
+                      setWaveAmplitude(p.amp);
+                      setWaveSmoothness(p.smooth);
+                    }
+                  }}>
+                    <option value="Custom">-- Custom --</option>
+                    {WAVE_PRESETS.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                </div>
 
-              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <label style={{ width: '80px', fontSize: '12px' }}>Smoothness:</label>
-                <input type="range" min="0.1" max="1.0" step="0.1" value={waveSmoothness} onChange={e => setWaveSmoothness(Number(e.target.value))} style={{ flex: 1 }} />
-                <span style={{ fontSize: '12px', width: '30px' }}>{waveSmoothness}s</span>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <label style={{ width: '80px', fontSize: '12px' }}>Target:</label>
+                  <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={waveTarget} onChange={e => setWaveTarget(e.target.value)}>
+                    <option value="Word">Whole Word (Smooth & No Tearing)</option>
+                    <option value="Letter">By Letter (May tear complex ligatures)</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <label style={{ width: '80px', fontSize: '12px' }}>Amplitude:</label>
+                  <input type="range" min="0" max="50" value={waveAmplitude} onChange={e => setWaveAmplitude(Number(e.target.value))} style={{ flex: 1 }} />
+                  <span style={{ fontSize: '12px', width: '30px' }}>{waveAmplitude}px</span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <label style={{ width: '80px', fontSize: '12px' }}>Smoothness:</label>
+                  <input type="range" min="0.1" max="1.0" step="0.1" value={waveSmoothness} onChange={e => setWaveSmoothness(Number(e.target.value))} style={{ flex: 1 }} />
+                  <span style={{ fontSize: '12px', width: '30px' }}>{waveSmoothness}s</span>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
             <label style={{ width: '80px', fontSize: '14px', color: '#ff9800' }}>Export FPS:</label>

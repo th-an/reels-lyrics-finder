@@ -2,6 +2,216 @@ import React, { useState, useRef, useEffect } from 'react';
 import html2canvas from 'html2canvas';
 import pixelmatch from 'pixelmatch';
 
+// High-Performance isolated component for "Super Smooth" animation
+const LyricsOverlay = React.memo(({ 
+  activeLyricIndex, 
+  lyrics, 
+  currentTime, 
+  fontFamily, 
+  fontSize, 
+  fontColor, 
+  highlightColor, 
+  placement, 
+  animationStyle, 
+  waveTarget, 
+  waveAmplitude, 
+  waveSmoothness, 
+  waveWidth, 
+  waveShape, 
+  waveOffset,
+  beatTimestamps,
+  isExporting,
+  getGraphemeMeasurements
+}) => {
+  if (activeLyricIndex === -1) return null;
+  const lyric = lyrics[activeLyricIndex];
+  if (!lyric) return null;
+
+  const text = lyric.text;
+  let duration = 5;
+  if (lyric.endTime !== null) {
+    duration = lyric.endTime - lyric.startTime;
+  } else if (lyrics[activeLyricIndex + 1] && lyrics[activeLyricIndex + 1].startTime !== null) {
+    duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
+  }
+  
+  const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
+  const totalChars = Array.from(segmenter.segment(text)).length;
+  const charDuration = duration / (totalChars || 1);
+  const words = text.split(' ');
+  let charAccumulator = 0;
+
+  return (
+    <div 
+      className={`lyrics-overlay ${placement}`}
+      style={{
+        fontFamily: fontFamily,
+        fontSize: `${fontSize}px`,
+        textAlign: 'center',
+        lineHeight: '1.4'
+      }}
+    >
+      {words.map((word, wordIndex) => {
+        const wordChars = Array.from(segmenter.segment(word)).length;
+        const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
+        const wordDuration = wordChars * charDuration;
+        
+        charAccumulator += wordChars + 1;
+
+        let progressPercentage = 0;
+        if (currentTime >= wordStartTime + wordDuration) {
+          progressPercentage = 100;
+        } else if (currentTime >= wordStartTime) {
+          const elapsed = currentTime - wordStartTime;
+          const charsRevealed = Math.floor(elapsed / charDuration);
+          progressPercentage = (charsRevealed / wordChars) * 100;
+        }
+
+        let scale = 1.0;
+        if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
+          let closestSpike = -1;
+          for (let i = beatTimestamps.length - 1; i >= 0; i--) {
+            if (beatTimestamps[i] <= currentTime) {
+              closestSpike = beatTimestamps[i];
+              break;
+            }
+          }
+          if (closestSpike !== -1) {
+            const elapsedSinceSpike = currentTime - closestSpike;
+            if (elapsedSinceSpike < 0.25) {
+              const decay = 1.0 - (elapsedSinceSpike / 0.25);
+              scale = 1.0 + (0.25 * Math.pow(decay, 2)); // Quadratic decay for snap
+            }
+          }
+        }
+
+        if (animationStyle === 'Karaoke Wave') {
+          if (waveTarget === 'Word') {
+            let translateY = 0;
+            let scale = 1.0;
+            if (currentTime >= wordStartTime) {
+                const elapsed = currentTime - wordStartTime;
+                if (elapsed < waveSmoothness) {
+                    const progress = elapsed / waveSmoothness;
+                    // Premium floaty cosine jump
+                    const wave = Math.pow(Math.sin(progress * Math.PI), 1.5);
+                    translateY = wave * -waveAmplitude; 
+                    scale = 1.0 + (wave * 0.10);
+                }
+            }
+            
+            return (
+              <React.Fragment key={wordIndex}>
+                <span style={{ 
+                  position: 'relative', 
+                  display: 'inline-block',
+                  transform: `translate3d(0, ${translateY}px, 0) scale(${scale})`,
+                  transformOrigin: 'center bottom',
+                  willChange: 'transform',
+                  transition: 'none' // Zero jitter
+                }}>
+                  <span style={{ color: fontColor }}>{word}</span>
+                  <span style={{
+                    position: 'absolute', top: 0, left: 0, bottom: 0,
+                    width: `${progressPercentage}%`,
+                    overflow: 'hidden', color: highlightColor, whiteSpace: 'nowrap'
+                  }}>
+                    {word}
+                  </span>
+                </span>
+                {wordIndex < words.length - 1 && <span> </span>}
+              </React.Fragment>
+            );
+          } else {
+            const graphemes = getGraphemeMeasurements(word);
+            const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
+
+            return (
+              <React.Fragment key={wordIndex}>
+                <span style={{ position: 'relative', display: 'inline-block' }}>
+                  <span style={{ color: 'transparent' }}>{word}</span>
+                  {graphemes.map((g, gIdx) => {
+                    const gCenter = ((g.leftPercent + g.rightPercent) / 2) / 100;
+                    const distance = activeProgress - gCenter;
+                    let wave = 0;
+                    
+                    if (Math.abs(distance) < waveWidth) {
+                        const phase = (distance / waveWidth) * (Math.PI / 2);
+                        if (waveShape === 'Sine') {
+                            // Premium raised cosine with heavy hang-time
+                            wave = Math.pow(Math.cos(phase), 2.5);
+                        } else if (waveShape === 'Spring') {
+                            // High-end snappy spring
+                            wave = Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.8);
+                            wave = Math.pow(Math.max(0, wave), 1.2);
+                        } else if (waveShape === 'Pulse') {
+                            // Ultra sharp hit
+                            wave = Math.pow(Math.cos(phase), 8);
+                        }
+                    }
+                    
+                    const translateY = wave * -waveAmplitude; 
+                    const scale = 1.0 + (wave * 0.10);
+                    const colorProgress = (currentTime - wordStartTime) / wordDuration;
+                    const color = colorProgress >= gCenter ? highlightColor : fontColor;
+                    
+                    const blur = 3; 
+                    const l1 = Math.max(0, g.leftPercent - blur);
+                    const l2 = g.leftPercent;
+                    const r1 = g.rightPercent;
+                    const r2 = Math.min(100, g.rightPercent + blur);
+                    const maskGradient = `linear-gradient(to right, transparent ${l1}%, black ${l2}%, black ${r1}%, transparent ${r2}%)`;
+
+                    return (
+                      <span key={gIdx} style={{
+                        position: 'absolute', top: 0, left: 0, bottom: 0, right: 0,
+                        color: color,
+                        WebkitMaskImage: maskGradient,
+                        maskImage: maskGradient,
+                        transform: `translate3d(0, ${translateY}px, 0) scale(${scale})`,
+                        transformOrigin: 'center bottom',
+                        willChange: 'transform',
+                        transition: 'none', // Critical for 60Hz smoothness
+                        filter: wave > 0.1 ? `drop-shadow(0 0 ${wave * 5}px ${highlightColor}66)` : 'none'
+                      }}>
+                        {word}
+                      </span>
+                    );
+                  })}
+                </span>
+                {wordIndex < words.length - 1 && <span> </span>}
+              </React.Fragment>
+            );
+          }
+        }
+
+        return (
+          <React.Fragment key={wordIndex}>
+            <span style={{ 
+              position: 'relative', 
+              display: 'inline-block',
+              transform: `translate3d(0, 0, 0) scale(${scale})`,
+              transformOrigin: 'center bottom',
+              willChange: 'transform',
+              transition: 'none'
+            }}>
+              <span style={{ color: fontColor }}>{word}</span>
+              <span style={{
+                position: 'absolute', top: 0, left: 0, bottom: 0,
+                width: `${progressPercentage}%`,
+                overflow: 'hidden', color: highlightColor, whiteSpace: 'nowrap'
+              }}>
+                {word}
+              </span>
+            </span>
+            {wordIndex < words.length - 1 && <span> </span>}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+});
+
 function App() {
   const [videoSrc, setVideoSrc] = useState(null);
   const [videoPath, setVideoPath] = useState(null);
@@ -547,213 +757,27 @@ function App() {
               No footage loaded
             </div>
           )}
-          {!renderedVideoSrc && activeLyricIndex !== -1 && lyrics[activeLyricIndex] && (
-            <div 
-              key={activeLyricIndex} 
-              className={`lyrics-overlay ${placement}`}
-              style={{
-                fontFamily: fontFamily,
-                fontSize: `${fontSize}px`,
-                textAlign: 'center',
-                lineHeight: '1.4'
-              }}
-            >
-              {(() => {
-                const lyric = lyrics[activeLyricIndex];
-                if (!lyric || lyric.startTime === null) return <span style={{ color: fontColor }}>{lyric ? lyric.text : ''}</span>;
-                if (animationStyle === 'None') return <span style={{ color: fontColor }}>{lyric.text}</span>;
-
-                const text = lyric.text;
-                let duration = 5;
-                if (lyric.endTime !== null) {
-                  duration = lyric.endTime - lyric.startTime;
-                } else if (lyrics[activeLyricIndex + 1] && lyrics[activeLyricIndex + 1].startTime !== null) {
-                  duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
-                }
-                
-                const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
-                const totalChars = Array.from(segmenter.segment(text)).length;
-                const charDuration = duration / (totalChars || 1);
-
-                const words = text.split(' ');
-                let charAccumulator = 0;
-
-                return words.map((word, wordIndex) => {
-                  const wordChars = Array.from(segmenter.segment(word)).length;
-                  const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
-                  const wordDuration = wordChars * charDuration;
-                  
-                  charAccumulator += wordChars + 1; // +1 for the space
-
-                  let progressPercentage = 0;
-                  if (currentTime >= wordStartTime + wordDuration) {
-                    progressPercentage = 100;
-                  } else if (currentTime >= wordStartTime) {
-                    const elapsed = currentTime - wordStartTime;
-                    const charsRevealed = Math.floor(elapsed / charDuration);
-                    progressPercentage = (charsRevealed / wordChars) * 100;
-                  }
-
-                  let scale = 1.0;
-                  if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
-                    let closestSpike = -1;
-                    for (let i = beatTimestamps.length - 1; i >= 0; i--) {
-                      if (beatTimestamps[i] <= currentTime) {
-                        closestSpike = beatTimestamps[i];
-                        break;
-                      }
-                    }
-                    if (closestSpike !== -1) {
-                      const elapsedSinceSpike = currentTime - closestSpike;
-                      if (elapsedSinceSpike < 0.25) {
-                        const decay = 1.0 - (elapsedSinceSpike / 0.25);
-                        scale = 1.0 + (0.25 * decay); // Max scale 1.25
-                      }
-                    }
-                  }
-
-                  if (animationStyle === 'Karaoke Wave') {
-                    if (waveTarget === 'Word') {
-                      let progressPercentage = 0;
-                      if (currentTime >= wordStartTime + wordDuration) {
-                        progressPercentage = 100;
-                      } else if (currentTime >= wordStartTime) {
-                        const elapsed = currentTime - wordStartTime;
-                        const charsRevealed = Math.floor(elapsed / charDuration);
-                        progressPercentage = (charsRevealed / wordChars) * 100;
-                      }
-
-                      let translateY = 0;
-                      let scale = 1.0;
-                      
-                      if (currentTime >= wordStartTime) {
-                          const elapsed = currentTime - wordStartTime;
-                          if (elapsed < waveSmoothness) {
-                              const progress = elapsed / waveSmoothness;
-                              const wave = Math.sin(progress * Math.PI);
-                              translateY = wave * -waveAmplitude; 
-                              scale = 1.0 + (wave * 0.10);
-                          }
-                      }
-                      
-                      return (
-                        <React.Fragment key={wordIndex}>
-                          <span style={{ 
-                            position: 'relative', 
-                            display: 'inline-block',
-                            transform: `translateY(${translateY}px) scale(${scale})`,
-                            transformOrigin: 'center bottom',
-                            transition: isExporting ? 'none' : 'transform 0.05s linear'
-                          }}>
-                            <span style={{ color: fontColor }}>{word}</span>
-                            <span style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              bottom: 0,
-                              width: `${progressPercentage}%`,
-                              overflow: 'hidden',
-                              color: highlightColor,
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {word}
-                            </span>
-                          </span>
-                          {wordIndex < words.length - 1 && <span> </span>}
-                        </React.Fragment>
-                      );
-                    } else {
-                      const graphemes = getGraphemeMeasurements(word);
-                      const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
-
-                      return (
-                        <React.Fragment key={wordIndex}>
-                          <span style={{ position: 'relative', display: 'inline-block' }}>
-                            <span style={{ color: 'transparent' }}>{word}</span>
-                            {graphemes.map((g, gIdx) => {
-                              const gCenter = ((g.leftPercent + g.rightPercent) / 2) / 100;
-                              const distance = activeProgress - gCenter;
-                              
-                              let wave = 0;
-                              // The waveWidth controls the overlap swell
-                              if (Math.abs(distance) < waveWidth) {
-                                  const phase = (distance / waveWidth) * (Math.PI / 2);
-                                  if (waveShape === 'Sine') {
-                                      wave = Math.cos(phase);
-                                  } else if (waveShape === 'Spring') {
-                                      // Elastic bouncy spring
-                                      wave = Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.5);
-                                  } else if (waveShape === 'Pulse') {
-                                      // Sharp spike
-                                      wave = Math.pow(Math.cos(phase), 4);
-                                  }
-                              }
-                              
-                              const translateY = wave * -waveAmplitude; 
-                              const scale = 1.0 + (wave * 0.10);
-                              
-                              // Color is tied exactly to the true current time, not the offset wave
-                              const colorProgress = (currentTime - wordStartTime) / wordDuration;
-                              const color = colorProgress >= gCenter ? highlightColor : fontColor;
-                              
-                              // Soft Masking (Gradient Blur) to prevent "square block" tearing
-                              const blur = 3; // 3% soft blur edge
-                              const l1 = Math.max(0, g.leftPercent - blur);
-                              const l2 = g.leftPercent;
-                              const r1 = g.rightPercent;
-                              const r2 = Math.min(100, g.rightPercent + blur);
-                              const maskGradient = `linear-gradient(to right, transparent ${l1}%, black ${l2}%, black ${r1}%, transparent ${r2}%)`;
-
-                              return (
-                                <span key={gIdx} style={{
-                                  position: 'absolute', top: 0, left: 0, bottom: 0, right: 0,
-                                  color: color,
-                                  WebkitMaskImage: maskGradient,
-                                  maskImage: maskGradient,
-                                  transform: `translateY(${translateY}px) scale(${scale})`,
-                                  transformOrigin: 'center bottom',
-                                  transition: isExporting ? 'none' : 'transform 0.05s linear, color 0.05s'
-                                }}>
-                                  {word}
-                                </span>
-                              );
-                            })}
-                          </span>
-                          {wordIndex < words.length - 1 && <span> </span>}
-                        </React.Fragment>
-                      );
-                    }
-                  }
-
-                  return (
-                    <React.Fragment key={wordIndex}>
-                      <span style={{ 
-                        position: 'relative', 
-                        display: 'inline-block',
-                        transform: `scale(${scale})`,
-                        transformOrigin: 'center bottom',
-                        transition: isExporting ? 'none' : 'transform 0.05s ease-out'
-                      }}>
-                        <span style={{ color: fontColor }}>{word}</span>
-                        <span style={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          bottom: 0,
-                          width: `${progressPercentage}%`,
-                          overflow: 'hidden',
-                          color: highlightColor,
-                          whiteSpace: 'nowrap'
-                        }}>
-                          {word}
-                        </span>
-                      </span>
-                      {wordIndex < words.length - 1 && <span> </span>}
-                    </React.Fragment>
-                  );
-                });
-              })()}
-            </div>
+          {!renderedVideoSrc && (
+            <LyricsOverlay 
+              activeLyricIndex={activeLyricIndex}
+              lyrics={lyrics}
+              currentTime={currentTime}
+              fontFamily={fontFamily}
+              fontSize={fontSize}
+              fontColor={fontColor}
+              highlightColor={highlightColor}
+              placement={placement}
+              animationStyle={animationStyle}
+              waveTarget={waveTarget}
+              waveAmplitude={waveAmplitude}
+              waveSmoothness={waveSmoothness}
+              waveWidth={waveWidth}
+              waveShape={waveShape}
+              waveOffset={waveOffset}
+              beatTimestamps={beatTimestamps}
+              isExporting={isExporting}
+              getGraphemeMeasurements={getGraphemeMeasurements}
+            />
           )}
         </div>
       </div>

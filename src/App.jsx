@@ -37,6 +37,9 @@ function App() {
   const [waveTarget, setWaveTarget] = useState('Word');
   const [waveAmplitude, setWaveAmplitude] = useState(15);
   const [waveSmoothness, setWaveSmoothness] = useState(0.4);
+  const [waveWidth, setWaveWidth] = useState(0.6);
+  const [waveShape, setWaveShape] = useState('Sine');
+  const [waveOffset, setWaveOffset] = useState(0);
   
   const videoRef = useRef(null);
   const measureCache = useRef({});
@@ -604,7 +607,7 @@ function App() {
                       );
                     } else {
                       const graphemes = getGraphemeMeasurements(word);
-                      const activeProgress = (currentTime - wordStartTime) / wordDuration;
+                      const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
 
                       return (
                         <React.Fragment key={wordIndex}>
@@ -615,22 +618,41 @@ function App() {
                               const distance = activeProgress - gCenter;
                               
                               let wave = 0;
-                              // The waveSmoothness controls the width of the bell curve swell.
-                              if (Math.abs(distance) < waveSmoothness) {
-                                  const phase = (distance / waveSmoothness) * (Math.PI / 2);
-                                  wave = Math.cos(phase);
+                              // The waveWidth controls the overlap swell
+                              if (Math.abs(distance) < waveWidth) {
+                                  const phase = (distance / waveWidth) * (Math.PI / 2);
+                                  if (waveShape === 'Sine') {
+                                      wave = Math.cos(phase);
+                                  } else if (waveShape === 'Spring') {
+                                      // Elastic bouncy spring
+                                      wave = Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.5);
+                                  } else if (waveShape === 'Pulse') {
+                                      // Sharp spike
+                                      wave = Math.pow(Math.cos(phase), 4);
+                                  }
                               }
                               
                               const translateY = wave * -waveAmplitude; 
                               const scale = 1.0 + (wave * 0.10);
-                              const color = activeProgress >= gCenter ? highlightColor : fontColor;
                               
+                              // Color is tied exactly to the true current time, not the offset wave
+                              const colorProgress = (currentTime - wordStartTime) / wordDuration;
+                              const color = colorProgress >= gCenter ? highlightColor : fontColor;
+                              
+                              // Soft Masking (Gradient Blur) to prevent "square block" tearing
+                              const blur = 3; // 3% soft blur edge
+                              const l1 = Math.max(0, g.leftPercent - blur);
+                              const l2 = g.leftPercent;
+                              const r1 = g.rightPercent;
+                              const r2 = Math.min(100, g.rightPercent + blur);
+                              const maskGradient = `linear-gradient(to right, transparent ${l1}%, black ${l2}%, black ${r1}%, transparent ${r2}%)`;
+
                               return (
                                 <span key={gIdx} style={{
                                   position: 'absolute', top: 0, left: 0, bottom: 0, right: 0,
                                   color: color,
-                                  WebkitMaskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
-                                  maskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
+                                  WebkitMaskImage: maskGradient,
+                                  maskImage: maskGradient,
                                   transform: `translateY(${translateY}px) scale(${scale})`,
                                   transformOrigin: 'center bottom',
                                   transition: isExporting ? 'none' : 'transform 0.05s linear, color 0.05s'
@@ -723,19 +745,18 @@ function App() {
 
           {animationStyle === 'Karaoke Wave' && (() => {
             const WAVE_PRESETS = [
-              { name: '1. Heavenly Float (Smoothest)', target: 'Word', amp: 10, smooth: 1.0 },
-              { name: '2. Gentle Breathe', target: 'Word', amp: 15, smooth: 0.8 },
-              { name: '3. Soft Ripple', target: 'Word', amp: 20, smooth: 0.6 },
-              { name: '4. Rhythmic Bounce', target: 'Word', amp: 25, smooth: 0.4 },
-              { name: '5. Standard Pop', target: 'Word', amp: 30, smooth: 0.3 },
-              { name: '6. Snappy Jump', target: 'Word', amp: 35, smooth: 0.2 },
-              { name: '7. Aggressive Kick', target: 'Word', amp: 40, smooth: 0.15 },
-              { name: '8. Hardcore Stomp (Hardest)', target: 'Word', amp: 50, smooth: 0.1 },
-              { name: '9. Letter Ripple (Tears Text)', target: 'Letter', amp: 15, smooth: 0.3 },
-              { name: '10. Chaotic Tremor (Tears Text)', target: 'Letter', amp: 30, smooth: 0.1 }
+              { name: '1. Heavenly Float (Word)', target: 'Word', amp: 10, smooth: 1.0, width: 0.6, shape: 'Sine', offset: 0 },
+              { name: '2. Soft Ripple (Word)', target: 'Word', amp: 20, smooth: 0.6, width: 0.6, shape: 'Sine', offset: 0 },
+              { name: '3. Standard Pop (Word)', target: 'Word', amp: 30, smooth: 0.3, width: 0.6, shape: 'Sine', offset: 0 },
+              { name: '4. Hardcore Stomp (Word)', target: 'Word', amp: 50, smooth: 0.1, width: 0.6, shape: 'Sine', offset: 0 },
+              { name: '5. Harmonic Swell (Letter)', target: 'Letter', amp: 15, smooth: 0.4, width: 0.8, shape: 'Sine', offset: 0 },
+              { name: '6. Elastic Bounce (Letter)', target: 'Letter', amp: 20, smooth: 0.4, width: 0.5, shape: 'Spring', offset: 100 },
+              { name: '7. Soft Ripple (Letter)', target: 'Letter', amp: 12, smooth: 0.4, width: 0.4, shape: 'Sine', offset: 0 },
+              { name: '8. Sharp Pulse (Letter)', target: 'Letter', amp: 25, smooth: 0.4, width: 0.2, shape: 'Pulse', offset: 50 },
+              { name: '9. Delayed Wave (Letter)', target: 'Letter', amp: 18, smooth: 0.4, width: 0.6, shape: 'Sine', offset: -150 }
             ];
             
-            const currentPresetName = WAVE_PRESETS.find(p => p.target === waveTarget && p.amp === waveAmplitude && p.smooth === waveSmoothness)?.name || 'Custom';
+            const currentPresetName = WAVE_PRESETS.find(p => p.target === waveTarget && p.amp === waveAmplitude && p.smooth === waveSmoothness && p.width === waveWidth && p.shape === waveShape && p.offset === waveOffset)?.name || 'Custom';
 
             return (
               <div style={{ padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -749,6 +770,9 @@ function App() {
                       setWaveTarget(p.target);
                       setWaveAmplitude(p.amp);
                       setWaveSmoothness(p.smooth);
+                      setWaveWidth(p.width);
+                      setWaveShape(p.shape);
+                      setWaveOffset(p.offset);
                     }
                   }}>
                     <option value="Custom">-- Custom --</option>
@@ -760,9 +784,34 @@ function App() {
                   <label style={{ width: '80px', fontSize: '12px' }}>Target:</label>
                   <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={waveTarget} onChange={e => setWaveTarget(e.target.value)}>
                     <option value="Word">Whole Word (Smooth & No Tearing)</option>
-                    <option value="Letter">By Letter (May tear complex ligatures)</option>
+                    <option value="Letter">By Letter (Soft-edge blended)</option>
                   </select>
                 </div>
+
+                {waveTarget === 'Letter' && (
+                  <>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <label style={{ width: '80px', fontSize: '12px' }}>Physics Shape:</label>
+                      <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={waveShape} onChange={e => setWaveShape(e.target.value)}>
+                        <option value="Sine">Harmonic Sine (Smooth)</option>
+                        <option value="Spring">Elastic Spring (Bouncy)</option>
+                        <option value="Pulse">Sharp Pulse (Spike)</option>
+                      </select>
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <label style={{ width: '80px', fontSize: '12px' }}>Wave Width:</label>
+                      <input type="range" min="0.1" max="2.0" step="0.1" value={waveWidth} onChange={e => setWaveWidth(Number(e.target.value))} style={{ flex: 1 }} />
+                      <span style={{ fontSize: '12px', width: '30px' }}>{waveWidth}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <label style={{ width: '80px', fontSize: '12px' }}>Wave Offset:</label>
+                      <input type="range" min="-500" max="500" step="50" value={waveOffset} onChange={e => setWaveOffset(Number(e.target.value))} style={{ flex: 1 }} />
+                      <span style={{ fontSize: '12px', width: '30px' }}>{waveOffset}ms</span>
+                    </div>
+                  </>
+                )}
 
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <label style={{ width: '80px', fontSize: '12px' }}>Amplitude:</label>
@@ -770,11 +819,13 @@ function App() {
                   <span style={{ fontSize: '12px', width: '30px' }}>{waveAmplitude}px</span>
                 </div>
 
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <label style={{ width: '80px', fontSize: '12px' }}>Smoothness:</label>
-                  <input type="range" min="0.1" max="1.0" step="0.1" value={waveSmoothness} onChange={e => setWaveSmoothness(Number(e.target.value))} style={{ flex: 1 }} />
-                  <span style={{ fontSize: '12px', width: '30px' }}>{waveSmoothness}s</span>
-                </div>
+                {waveTarget === 'Word' && (
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <label style={{ width: '80px', fontSize: '12px' }}>Smoothness:</label>
+                    <input type="range" min="0.1" max="1.0" step="0.1" value={waveSmoothness} onChange={e => setWaveSmoothness(Number(e.target.value))} style={{ flex: 1 }} />
+                    <span style={{ fontSize: '12px', width: '30px' }}>{waveSmoothness}s</span>
+                  </div>
+                )}
               </div>
             );
           })()}

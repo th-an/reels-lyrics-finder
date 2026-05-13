@@ -24,7 +24,9 @@ function App() {
   const [fontFamily, setFontFamily] = useState('Tamil MN'); 
   const [fontSize, setFontSize] = useState(60);
   const [fontColor, setFontColor] = useState('#ffffff');
+  const [highlightColor, setHighlightColor] = useState('#ffff00');
   const [placement, setPlacement] = useState('pos-bottom'); 
+  const [animationStyle, setAnimationStyle] = useState('Karaoke');
   
   const videoRef = useRef(null);
 
@@ -379,10 +381,63 @@ function App() {
               style={{
                 fontFamily: fontFamily,
                 fontSize: `${fontSize}px`,
-                color: fontColor
+                textAlign: 'center',
+                lineHeight: '1.4'
               }}
             >
-              {lyrics[activeLyricIndex].text}
+              {(() => {
+                const lyric = lyrics[activeLyricIndex];
+                if (!lyric || lyric.startTime === null) return <span style={{ color: fontColor }}>{lyric ? lyric.text : ''}</span>;
+                if (animationStyle === 'None') return <span style={{ color: fontColor }}>{lyric.text}</span>;
+
+                const text = lyric.text;
+                const duration = (lyric.endTime !== null ? lyric.endTime : lyric.startTime + 5) - lyric.startTime;
+                
+                const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
+                const totalChars = Array.from(segmenter.segment(text)).length;
+                const charDuration = duration / (totalChars || 1);
+
+                const words = text.split(' ');
+                let charAccumulator = 0;
+
+                return words.map((word, wordIndex) => {
+                  const wordChars = Array.from(segmenter.segment(word)).length;
+                  const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
+                  const wordDuration = wordChars * charDuration;
+                  
+                  charAccumulator += wordChars + 1; // +1 for the space
+
+                  let progressPercentage = 0;
+                  if (currentTime >= wordStartTime + wordDuration) {
+                    progressPercentage = 100;
+                  } else if (currentTime >= wordStartTime) {
+                    const elapsed = currentTime - wordStartTime;
+                    const charsRevealed = Math.floor(elapsed / charDuration);
+                    progressPercentage = (charsRevealed / wordChars) * 100;
+                  }
+
+                  return (
+                    <React.Fragment key={wordIndex}>
+                      <span style={{ position: 'relative', display: 'inline-block' }}>
+                        <span style={{ color: fontColor }}>{word}</span>
+                        <span style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          bottom: 0,
+                          width: `${progressPercentage}%`,
+                          overflow: 'hidden',
+                          color: highlightColor,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {word}
+                        </span>
+                      </span>
+                      {wordIndex < words.length - 1 && <span> </span>}
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </div>
           )}
         </div>
@@ -409,7 +464,8 @@ function App() {
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <label style={{ width: '80px', fontSize: '14px' }}>Color:</label>
-            <input type="color" value={fontColor} onChange={e => setFontColor(e.target.value)} style={{ width: '40px', height: '30px', padding: '0', border: 'none' }} />
+            <input type="color" value={fontColor} onChange={e => setFontColor(e.target.value)} style={{ width: '40px', height: '30px', padding: '0', border: 'none' }} title="Base Color" />
+            <input type="color" value={highlightColor} onChange={e => setHighlightColor(e.target.value)} style={{ width: '40px', height: '30px', padding: '0', border: 'none', opacity: animationStyle === 'None' ? 0.5 : 1 }} title="Highlight Color" disabled={animationStyle === 'None'} />
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <label style={{ width: '80px', fontSize: '14px' }}>Placement:</label>
@@ -417,6 +473,13 @@ function App() {
               <option value="pos-top">Top</option>
               <option value="pos-middle">Middle</option>
               <option value="pos-bottom">Bottom</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <label style={{ width: '80px', fontSize: '14px' }}>Animation:</label>
+            <select style={{ flex: 1, padding: '5px' }} value={animationStyle} onChange={e => setAnimationStyle(e.target.value)}>
+              <option value="None">None</option>
+              <option value="Karaoke">Karaoke (Highlight)</option>
             </select>
           </div>
         </div>

@@ -32,6 +32,11 @@ function App() {
   const [placement, setPlacement] = useState('pos-bottom'); 
   const [animationStyle, setAnimationStyle] = useState('Karaoke Wave');
   const [exportFps, setExportFps] = useState(60);
+
+  // Animation Studio States
+  const [waveTarget, setWaveTarget] = useState('Word');
+  const [waveAmplitude, setWaveAmplitude] = useState(15);
+  const [waveSmoothness, setWaveSmoothness] = useState(0.4);
   
   const videoRef = useRef(null);
   const measureCache = useRef({});
@@ -548,42 +553,97 @@ function App() {
                   }
 
                   if (animationStyle === 'Karaoke Wave') {
-                    const graphemes = getGraphemeMeasurements(word);
-                    return (
-                      <React.Fragment key={wordIndex}>
-                        <span style={{ position: 'relative', display: 'inline-block' }}>
-                          <span style={{ color: 'transparent' }}>{word}</span>
-                          {graphemes.map((g, gIdx) => {
-                            const gStartTime = wordStartTime + ((gIdx / graphemes.length) * wordDuration);
-                            let translateY = 0;
-                            let color = fontColor;
-                            
-                            if (currentTime >= gStartTime) {
-                                color = highlightColor;
-                                const elapsed = currentTime - gStartTime;
-                                if (elapsed < 0.25) {
-                                    const progress = elapsed / 0.25;
-                                    translateY = Math.sin(progress * Math.PI) * -15; 
-                                }
-                            }
-                            
-                            return (
-                              <span key={gIdx} style={{
-                                position: 'absolute', top: 0, left: 0, bottom: 0, right: 0,
-                                color: color,
-                                WebkitMaskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
-                                maskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
-                                transform: `translateY(${translateY}px)`,
-                                transition: isExporting ? 'none' : 'transform 0.05s linear, color 0.05s'
-                              }}>
-                                {word}
-                              </span>
-                            );
-                          })}
-                        </span>
-                        {wordIndex < words.length - 1 && <span> </span>}
-                      </React.Fragment>
-                    );
+                    if (waveTarget === 'Word') {
+                      let progressPercentage = 0;
+                      if (currentTime >= wordStartTime + wordDuration) {
+                        progressPercentage = 100;
+                      } else if (currentTime >= wordStartTime) {
+                        const elapsed = currentTime - wordStartTime;
+                        const charsRevealed = Math.floor(elapsed / charDuration);
+                        progressPercentage = (charsRevealed / wordChars) * 100;
+                      }
+
+                      let translateY = 0;
+                      let scale = 1.0;
+                      
+                      if (currentTime >= wordStartTime) {
+                          const elapsed = currentTime - wordStartTime;
+                          if (elapsed < waveSmoothness) {
+                              const progress = elapsed / waveSmoothness;
+                              const wave = Math.sin(progress * Math.PI);
+                              translateY = wave * -waveAmplitude; 
+                              scale = 1.0 + (wave * 0.10);
+                          }
+                      }
+                      
+                      return (
+                        <React.Fragment key={wordIndex}>
+                          <span style={{ 
+                            position: 'relative', 
+                            display: 'inline-block',
+                            transform: `translateY(${translateY}px) scale(${scale})`,
+                            transformOrigin: 'center bottom',
+                            transition: isExporting ? 'none' : 'transform 0.05s linear'
+                          }}>
+                            <span style={{ color: fontColor }}>{word}</span>
+                            <span style={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              bottom: 0,
+                              width: `${progressPercentage}%`,
+                              overflow: 'hidden',
+                              color: highlightColor,
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {word}
+                            </span>
+                          </span>
+                          {wordIndex < words.length - 1 && <span> </span>}
+                        </React.Fragment>
+                      );
+                    } else {
+                      const graphemes = getGraphemeMeasurements(word);
+                      return (
+                        <React.Fragment key={wordIndex}>
+                          <span style={{ position: 'relative', display: 'inline-block' }}>
+                            <span style={{ color: 'transparent' }}>{word}</span>
+                            {graphemes.map((g, gIdx) => {
+                              const gStartTime = wordStartTime + ((gIdx / graphemes.length) * wordDuration);
+                              let translateY = 0;
+                              let scale = 1.0;
+                              let color = fontColor;
+                              
+                              if (currentTime >= gStartTime) {
+                                  color = highlightColor;
+                                  const elapsed = currentTime - gStartTime;
+                                  if (elapsed < waveSmoothness) {
+                                      const progress = elapsed / waveSmoothness;
+                                      const wave = Math.sin(progress * Math.PI);
+                                      translateY = wave * -waveAmplitude; 
+                                      scale = 1.0 + (wave * 0.10);
+                                  }
+                              }
+                              
+                              return (
+                                <span key={gIdx} style={{
+                                  position: 'absolute', top: 0, left: 0, bottom: 0, right: 0,
+                                  color: color,
+                                  WebkitMaskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
+                                  maskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
+                                  transform: `translateY(${translateY}px) scale(${scale})`,
+                                  transformOrigin: 'center bottom',
+                                  transition: isExporting ? 'none' : 'transform 0.05s linear, color 0.05s'
+                                }}>
+                                  {word}
+                                </span>
+                              );
+                            })}
+                          </span>
+                          {wordIndex < words.length - 1 && <span> </span>}
+                        </React.Fragment>
+                      );
+                    }
                   }
 
                   return (
@@ -657,10 +717,37 @@ function App() {
               <option value="None">None</option>
               <option value="Karaoke">Karaoke (Highlight)</option>
               <option value="Karaoke Pop">Karaoke Pop (Beat Reactive)</option>
-              <option value="Karaoke Wave">Karaoke Wave (Letter Jump)</option>
+              <option value="Karaoke Wave">Karaoke Wave (Jumping Float)</option>
             </select>
           </div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+
+          {animationStyle === 'Karaoke Wave' && (
+            <div style={{ padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <strong style={{ fontSize: '14px' }}>🌊 Animation Studio</strong>
+              
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <label style={{ width: '80px', fontSize: '12px' }}>Target:</label>
+                <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={waveTarget} onChange={e => setWaveTarget(e.target.value)}>
+                  <option value="Word">Whole Word (Smooth & No Tearing)</option>
+                  <option value="Letter">By Letter (May tear complex ligatures)</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <label style={{ width: '80px', fontSize: '12px' }}>Amplitude:</label>
+                <input type="range" min="0" max="50" value={waveAmplitude} onChange={e => setWaveAmplitude(Number(e.target.value))} style={{ flex: 1 }} />
+                <span style={{ fontSize: '12px', width: '30px' }}>{waveAmplitude}px</span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <label style={{ width: '80px', fontSize: '12px' }}>Smoothness:</label>
+                <input type="range" min="0.1" max="1.0" step="0.1" value={waveSmoothness} onChange={e => setWaveSmoothness(Number(e.target.value))} style={{ flex: 1 }} />
+                <span style={{ fontSize: '12px', width: '30px' }}>{waveSmoothness}s</span>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
             <label style={{ width: '80px', fontSize: '14px', color: '#ff9800' }}>Export FPS:</label>
             <select style={{ flex: 1, padding: '5px' }} value={exportFps} onChange={e => setExportFps(parseInt(e.target.value))}>
               <option value="30">30 Hz</option>

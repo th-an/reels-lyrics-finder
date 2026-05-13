@@ -9,11 +9,68 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [lyrics, setLyrics] = useState([]);
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
-  const [currentTime, setCurrentTime] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const [renderProgress, setRenderProgress] = useState(null);
   const [renderedVideoPath, setRenderedVideoPath] = useState(null);
   const [renderedVideoSrc, setRenderedVideoSrc] = useState(null);
+
+  const [currentTime, setCurrentTime] = useState(0);
+
+  // High-Frequency Time Interpolator (Unlocks 60Hz/120Hz Live Preview)
+  useEffect(() => {
+    let animationFrameId;
+    let lastVideoTime = -1;
+    let localTime = 0;
+    let lastSysTime = performance.now();
+
+    const updateTime = () => {
+      if (videoRef.current && !videoRef.current.paused && !isExporting) {
+        const currentVideoTime = videoRef.current.currentTime;
+        const currentSysTime = performance.now();
+        const deltaSys = (currentSysTime - lastSysTime) / 1000;
+        
+        // Browsers only update video.currentTime at the video's native framerate (usually 24 or 30fps).
+        // By interpolating time between video frame updates, we unlock buttery smooth 60/120Hz animations in the UI!
+        if (currentVideoTime !== lastVideoTime) {
+            localTime = currentVideoTime;
+            lastVideoTime = currentVideoTime;
+        } else {
+            localTime += deltaSys;
+        }
+        lastSysTime = currentSysTime;
+        
+        setCurrentTime(localTime);
+        animationFrameId = requestAnimationFrame(updateTime);
+      }
+    };
+    
+    const handlePlay = () => {
+      lastSysTime = performance.now();
+      lastVideoTime = videoRef.current?.currentTime || 0;
+      localTime = lastVideoTime;
+      animationFrameId = requestAnimationFrame(updateTime);
+    };
+    const handlePause = () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+    };
+    const handleSeek = () => {
+      if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+    };
+    
+    const video = videoRef.current;
+    if (video) {
+      video.addEventListener('play', handlePlay);
+      video.addEventListener('pause', handlePause);
+      video.addEventListener('seeked', handleSeek);
+      return () => {
+        video.removeEventListener('play', handlePlay);
+        video.removeEventListener('pause', handlePause);
+        video.removeEventListener('seeked', handleSeek);
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      };
+    }
+  }, [isExporting]);
 
   // Analyzer States
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -753,7 +810,14 @@ function App() {
               { name: '6. Elastic Bounce (Letter)', target: 'Letter', amp: 20, smooth: 0.4, width: 0.5, shape: 'Spring', offset: 100 },
               { name: '7. Soft Ripple (Letter)', target: 'Letter', amp: 12, smooth: 0.4, width: 0.4, shape: 'Sine', offset: 0 },
               { name: '8. Sharp Pulse (Letter)', target: 'Letter', amp: 25, smooth: 0.4, width: 0.2, shape: 'Pulse', offset: 50 },
-              { name: '9. Delayed Wave (Letter)', target: 'Letter', amp: 18, smooth: 0.4, width: 0.6, shape: 'Sine', offset: -150 }
+              { name: '9. Delayed Wave (Letter)', target: 'Letter', amp: 18, smooth: 0.4, width: 0.6, shape: 'Sine', offset: -150 },
+              
+              // High-Width Smooth Letter Presets
+              { name: '10. Liquid River (Letter)', target: 'Letter', amp: 15, smooth: 0.5, width: 1.2, shape: 'Sine', offset: 0 },
+              { name: '11. Tidal Swell (Letter)', target: 'Letter', amp: 25, smooth: 0.6, width: 1.5, shape: 'Sine', offset: 0 },
+              { name: '12. Gentle Sea (Letter)', target: 'Letter', amp: 10, smooth: 0.4, width: 1.0, shape: 'Sine', offset: 0 },
+              { name: '13. Floating Cloud (Letter)', target: 'Letter', amp: 8, smooth: 0.8, width: 1.8, shape: 'Sine', offset: 0 },
+              { name: '14. Ocean Wave (Letter)', target: 'Letter', amp: 20, smooth: 0.5, width: 1.4, shape: 'Sine', offset: 50 }
             ];
             
             const currentPresetName = WAVE_PRESETS.find(p => p.target === waveTarget && p.amp === waveAmplitude && p.smooth === waveSmoothness && p.width === waveWidth && p.shape === waveShape && p.offset === waveOffset)?.name || 'Custom';

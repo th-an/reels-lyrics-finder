@@ -604,26 +604,26 @@ function App() {
                       );
                     } else {
                       const graphemes = getGraphemeMeasurements(word);
+                      const activeProgress = (currentTime - wordStartTime) / wordDuration;
+
                       return (
                         <React.Fragment key={wordIndex}>
                           <span style={{ position: 'relative', display: 'inline-block' }}>
                             <span style={{ color: 'transparent' }}>{word}</span>
                             {graphemes.map((g, gIdx) => {
-                              const gStartTime = wordStartTime + ((gIdx / graphemes.length) * wordDuration);
-                              let translateY = 0;
-                              let scale = 1.0;
-                              let color = fontColor;
+                              const gCenter = ((g.leftPercent + g.rightPercent) / 2) / 100;
+                              const distance = activeProgress - gCenter;
                               
-                              if (currentTime >= gStartTime) {
-                                  color = highlightColor;
-                                  const elapsed = currentTime - gStartTime;
-                                  if (elapsed < waveSmoothness) {
-                                      const progress = elapsed / waveSmoothness;
-                                      const wave = Math.sin(progress * Math.PI);
-                                      translateY = wave * -waveAmplitude; 
-                                      scale = 1.0 + (wave * 0.10);
-                                  }
+                              let wave = 0;
+                              // The waveSmoothness controls the width of the bell curve swell.
+                              if (Math.abs(distance) < waveSmoothness) {
+                                  const phase = (distance / waveSmoothness) * (Math.PI / 2);
+                                  wave = Math.cos(phase);
                               }
+                              
+                              const translateY = wave * -waveAmplitude; 
+                              const scale = 1.0 + (wave * 0.10);
+                              const color = activeProgress >= gCenter ? highlightColor : fontColor;
                               
                               return (
                                 <span key={gIdx} style={{

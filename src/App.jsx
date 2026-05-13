@@ -19,6 +19,10 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showAnalyzer, setShowAnalyzer] = useState(false);
   const [analyzerData, setAnalyzerData] = useState(null);
+  
+  // Audio Beat States
+  const [beatTimestamps, setBeatTimestamps] = useState([]);
+  const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
 
   // Styling States
   const [fontFamily, setFontFamily] = useState('Tamil MN'); 
@@ -26,7 +30,7 @@ function App() {
   const [fontColor, setFontColor] = useState('#ffffff');
   const [highlightColor, setHighlightColor] = useState('#ffff00');
   const [placement, setPlacement] = useState('pos-bottom'); 
-  const [animationStyle, setAnimationStyle] = useState('Karaoke');
+  const [animationStyle, setAnimationStyle] = useState('Karaoke Pop');
   const [exportFps, setExportFps] = useState(60);
   
   const videoRef = useRef(null);
@@ -39,10 +43,55 @@ function App() {
         setVideoSrc(`local-resource://${path}`); 
         setRenderedVideoPath(null);
         setRenderedVideoSrc(null);
+        analyzeAudioBeats(`file://${path}`);
       }
     } else {
       alert("Electron API not available");
     }
+  };
+
+  const analyzeAudioBeats = async (url) => {
+    setIsAnalyzingAudio(true);
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      
+      const channelData = audioBuffer.getChannelData(0);
+      const sampleRate = audioBuffer.sampleRate;
+      const windowSize = Math.floor(sampleRate * 0.05); // 50ms
+      
+      let maxDecibel = -Infinity;
+      const energyLevels = [];
+      
+      for (let i = 0; i < channelData.length; i += windowSize) {
+        let sum = 0;
+        for (let j = 0; j < windowSize && (i + j) < channelData.length; j++) {
+          sum += channelData[i + j] * channelData[i + j];
+        }
+        const rms = Math.sqrt(sum / windowSize);
+        const decibel = 20 * Math.log10(rms || 1e-10);
+        energyLevels.push({ time: i / sampleRate, db: decibel });
+        if (decibel > maxDecibel) maxDecibel = decibel;
+      }
+      
+      const threshold = maxDecibel - 12; // Top 12dB
+      const spikes = [];
+      let lastSpikeTime = -1;
+      
+      for (const level of energyLevels) {
+        if (level.db > threshold && (level.time - lastSpikeTime) > 0.3) {
+          spikes.push(level.time);
+          lastSpikeTime = level.time;
+        }
+      }
+      
+      setBeatTimestamps(spikes);
+    } catch (e) {
+      console.error("Audio analysis failed:", e);
+    }
+    setIsAnalyzingAudio(false);
   };
 
   const handleSearchLyrics = async () => {
@@ -348,8 +397,8 @@ function App() {
 
       <div className="video-workspace">
         <div style={{ marginBottom: '15px', display: 'flex', gap: '10px', width: '100%', maxWidth: '800px', justifyContent: 'center' }}>
-          <button onClick={handleSelectVideo} disabled={renderedVideoSrc !== null}>
-            {videoSrc ? 'Change Video' : 'Load Reels Footage'}
+          <button onClick={handleSelectVideo} disabled={renderedVideoSrc !== null || isAnalyzingAudio}>
+            {isAnalyzingAudio ? 'Analyzing Beats...' : (videoSrc ? 'Change Video' : 'Load Reels Footage')}
           </button>
           {videoSrc && !renderedVideoSrc && (
             <button 
@@ -429,9 +478,33 @@ function App() {
                     progressPercentage = (charsRevealed / wordChars) * 100;
                   }
 
+                  let scale = 1.0;
+                  if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
+                    let closestSpike = -1;
+                    for (let i = beatTimestamps.length - 1; i >= 0; i--) {
+                      if (beatTimestamps[i] <= currentTime) {
+                        closestSpike = beatTimestamps[i];
+                        break;
+                      }
+                    }
+                    if (closestSpike !== -1) {
+                      const elapsedSinceSpike = currentTime - closestSpike;
+                      if (elapsedSinceSpike < 0.25) {
+                        const decay = 1.0 - (elapsedSinceSpike / 0.25);
+                        scale = 1.0 + (0.25 * decay); // Max scale 1.25
+                      }
+                    }
+                  }
+
                   return (
                     <React.Fragment key={wordIndex}>
-                      <span style={{ position: 'relative', display: 'inline-block' }}>
+                      <span style={{ 
+                        position: 'relative', 
+                        display: 'inline-block',
+                        transform: `scale(${scale})`,
+                        transformOrigin: 'center bottom',
+                        transition: isExporting ? 'none' : 'transform 0.05s ease-out'
+                      }}>
                         <span style={{ color: fontColor }}>{word}</span>
                         <span style={{
                           position: 'absolute',
@@ -493,6 +566,7 @@ function App() {
             <select style={{ flex: 1, padding: '5px' }} value={animationStyle} onChange={e => setAnimationStyle(e.target.value)}>
               <option value="None">None</option>
               <option value="Karaoke">Karaoke (Highlight)</option>
+              <option value="Karaoke Pop">Karaoke Pop (Beat Reactive)</option>
             </select>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>

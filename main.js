@@ -7,6 +7,13 @@ const ffmpegStatic = require('ffmpeg-static');
 // Set ffmpeg path to the static binary
 ffmpeg.setFfmpegPath(ffmpegStatic);
 
+// Enable M2 Hardware Acceleration & GPU Optimizations
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('enable-native-gpu-memory-buffers');
+app.commandLine.appendSwitch('enable-webgl-draft-extensions');
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,

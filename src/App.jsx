@@ -1,198 +1,127 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import html2canvas from 'html2canvas';
 import pixelmatch from 'pixelmatch';
 
-// M2-Optimized High-Performance Canvas Engine
+// High-Performance DOM-based Lyrics Engine
 const LyricsOverlay = React.memo(({ 
-  activeLyricIndex, lyrics, currentTime, fontFamily, fontSize, fontColor, 
-  highlightColor, placement, animationStyle, waveTarget, waveAmplitude, 
-  waveSmoothness, waveWidth, waveShape, waveOffset, beatTimestamps, 
-  isExporting, getGraphemeMeasurements 
+  activeLyricIndex, lyrics, currentTime, fontFamily, fontSize, fontColor, highlightColor, 
+  animationStyle, waveTarget, waveAmplitude, waveSmoothness, waveWidth, waveShape, waveOffset, 
+  waveFalloff, beatTimestamps, placement
 }) => {
-  const canvasRef = useRef(null);
-  const offscreenRef = useRef(document.createElement('canvas'));
-
   if (activeLyricIndex === -1) return null;
+  const lyric = lyrics[activeLyricIndex];
+  if (!lyric) return null;
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || activeLyricIndex === -1) return;
+  // PRE-SEGMENT EVERYTHING (Critical for 60Hz/120Hz)
+  const segmentData = useMemo(() => {
+    const text = lyric.text;
+    const words = text.split(' ');
+    const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
     
-    try {
-      const ctx = canvas.getContext('2d', { alpha: true });
-      const lyric = lyrics[activeLyricIndex];
-      if (!lyric) return;
+    let totalChars = 0;
+    const wordData = words.map(word => {
+      const graphemes = Array.from(segmenter.segment(word)).map(s => s.segment);
+      totalChars += graphemes.length;
+      return { word, graphemes, count: graphemes.length };
+    });
+    
+    return { wordData, totalChars: totalChars + (words.length - 1) };
+  }, [lyric.text]);
 
-      // Set canvas resolution to match container (Retina/M2 High-DPI support)
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      
-      // Safety: If rect is not ready, don't draw
-      if (rect.width <= 0 || rect.height <= 0) return;
-
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      
-      // Reset transform and scale properly
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      const text = lyric.text;
-      const words = text.split(' ');
-      
-      // Calculate Timing
-      let duration = 5;
-      if (lyric.endTime !== null) {
-        duration = lyric.endTime - lyric.startTime;
-      } else if (lyrics[activeLyricIndex + 1]?.startTime) {
-        duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
-      }
-      
-      const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
-      const totalChars = Array.from(segmenter.segment(text)).length;
-      const charDuration = duration / (totalChars || 1);
-
-      ctx.clearRect(0, 0, rect.width, rect.height);
-      ctx.font = `${fontSize}px "${fontFamily}"`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      const fullWidth = ctx.measureText(text).width;
-      let startX = (rect.width - fullWidth) / 2;
-      const centerY = rect.height / 2;
-
-      let charAccumulator = 0;
-
-      words.forEach((word, wordIndex) => {
-        const wordChars = Array.from(segmenter.segment(word)).length;
-        const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
-        const wordDuration = Math.max(0.01, wordChars * charDuration); // Avoid div by zero
-        const wordWidth = ctx.measureText(word).width;
-        
-        charAccumulator += wordChars + 1;
-
-        // Calculate Wave & Pop
-        let scale = 1.0;
-        let globalTranslateY = 0;
-
-        if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
-          let closestSpike = -1;
-          for (let i = beatTimestamps.length - 1; i >= 0; i--) {
-            if (beatTimestamps[i] <= currentTime) { closestSpike = beatTimestamps[i]; break; }
-          }
-          if (closestSpike !== -1) {
-            const elapsed = currentTime - closestSpike;
-            if (elapsed < 0.25) scale = 1.0 + (0.25 * Math.pow(1.0 - (elapsed / 0.25), 2));
-          }
-        }
-
-        if (animationStyle === 'Karaoke Wave' && waveTarget === 'Word') {
-          const elapsed = currentTime - wordStartTime;
-          if (elapsed >= 0 && elapsed < waveSmoothness) {
-            const wave = Math.pow(Math.sin((elapsed / waveSmoothness) * Math.PI), 1.5);
-            globalTranslateY = wave * -waveAmplitude;
-            scale = 1.0 + (wave * 0.10);
-          }
-        }
-
-        if (waveTarget === 'Word' || animationStyle !== 'Karaoke Wave') {
-          // Draw Word (Simple Path)
-          ctx.save();
-          ctx.translate(startX + wordWidth / 2, centerY + globalTranslateY);
-          ctx.scale(scale, scale);
-          
-          // Draw Base
-          ctx.fillStyle = fontColor;
-          ctx.fillText(word, 0, 0);
-
-          // Draw Highlight
-          const elapsed = currentTime - wordStartTime;
-          const progress = Math.max(0, Math.min(1, elapsed / wordDuration));
-          if (progress > 0) {
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(-wordWidth / 2, -fontSize, wordWidth * progress, fontSize * 2);
-            ctx.clip();
-            ctx.fillStyle = highlightColor;
-            ctx.fillText(word, 0, 0);
-            ctx.restore();
-          }
-          ctx.restore();
-        } else {
-          // GPU-Optimized Letter-by-Letter Grapheme Slicing
-          const graphemes = getGraphemeMeasurements(word);
-          const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
-
-          // Draw entire word to offscreen buffer once per word to keep ligatures perfect
-          const off = offscreenRef.current;
-          const offCtx = off.getContext('2d');
-          
-          // Only resize if needed to save performance
-          const targetW = Math.max(1, wordWidth * dpr);
-          const targetH = Math.max(1, fontSize * 2 * dpr);
-          if (off.width !== targetW || off.height !== targetH) {
-            off.width = targetW;
-            off.height = targetH;
-          }
-          
-          offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-          offCtx.clearRect(0, 0, wordWidth, fontSize * 2);
-          offCtx.font = `${fontSize}px "${fontFamily}"`;
-          offCtx.textBaseline = 'middle';
-          offCtx.textAlign = 'left';
-
-          graphemes.forEach((g, gIdx) => {
-            const gCenter = ((g.leftPercent + g.rightPercent) / 2) / 100;
-            const distance = activeProgress - gCenter;
-            let wave = 0;
-            if (Math.abs(distance) < waveWidth) {
-              const phase = (distance / waveWidth) * (Math.PI / 2);
-              if (waveShape === 'Sine') wave = Math.pow(Math.cos(phase), 2.5);
-              else if (waveShape === 'Spring') wave = Math.pow(Math.max(0, Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.8)), 1.2);
-              else if (waveShape === 'Pulse') wave = Math.pow(Math.cos(phase), 8);
-            }
-
-            const ty = wave * -waveAmplitude;
-            const ts = 1.0 + (wave * 0.10);
-            const colorProgress = (currentTime - wordStartTime) / wordDuration;
-            const color = colorProgress >= gCenter ? highlightColor : fontColor;
-
-            ctx.save();
-            const gX = startX + (g.leftPercent / 100) * wordWidth;
-            const gW = ((g.rightPercent - g.leftPercent) / 100) * wordWidth;
-            
-            ctx.translate(gX + gW / 2, centerY + ty);
-            ctx.scale(ts, ts);
-            
-            ctx.fillStyle = color;
-            if (wave > 0.1) {
-              ctx.shadowBlur = wave * 10;
-              ctx.shadowColor = highlightColor;
-            }
-
-            // Clip to the grapheme's horizontal bounds
-            ctx.beginPath();
-            ctx.rect(-gW/2, -fontSize, gW, fontSize*2);
-            ctx.clip();
-            
-            // Draw relative to grapheme center
-            ctx.fillText(word, - (g.leftPercent / 100 * wordWidth) - (gW / 2), 0);
-            ctx.restore();
-          });
-        }
-
-        startX += wordWidth + ctx.measureText(' ').width;
-      });
-    } catch (err) {
-      console.error("Canvas draw error:", err);
-    }
-  }, [currentTime, activeLyricIndex, lyrics, fontFamily, fontSize, fontColor, highlightColor, animationStyle, waveTarget, waveAmplitude, waveSmoothness, waveWidth, waveShape, waveOffset]);
+  const { wordData, totalChars } = segmentData;
+  
+  let duration = 5;
+  if (lyric.endTime !== null) duration = lyric.endTime - lyric.startTime;
+  else if (lyrics[activeLyricIndex + 1]?.startTime) duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
+  
+  const charDuration = duration / (totalChars || 1);
+  let charAccumulator = 0;
 
   return (
-    <canvas 
-      ref={canvasRef} 
-      className={`lyrics-overlay ${placement}`}
-      style={{ width: '100%', height: '100%', pointerEvents: 'none' }}
-    />
+    <div className={`lyrics-overlay ${placement}`} style={{ 
+      fontFamily, fontSize: `${fontSize}px`, 
+      display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center',
+      willChange: 'transform'
+    }}>
+      {wordData.map((w, wordIndex) => {
+        const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
+        const wordDuration = Math.max(0.01, w.count * charDuration);
+        charAccumulator += w.count + 1;
+
+        if (animationStyle !== 'Karaoke Wave' || waveTarget === 'Word') {
+          let scale = 1.0;
+          let ty = 0;
+          const elapsed = currentTime - wordStartTime;
+
+          if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
+            let lastSpike = -1;
+            for (let i = beatTimestamps.length - 1; i >= 0; i--) { if (beatTimestamps[i] <= currentTime) { lastSpike = beatTimestamps[i]; break; } }
+            if (lastSpike !== -1) {
+              const e = currentTime - lastSpike;
+              if (e < 0.25) scale = 1.0 + (0.25 * Math.pow(1.0 - (e / 0.25), 2));
+            }
+          }
+
+          if (animationStyle === 'Karaoke Wave' && elapsed >= 0 && elapsed < waveSmoothness) {
+            const wave = Math.pow(Math.sin((elapsed / waveSmoothness) * Math.PI), 1.5);
+            ty = wave * -waveAmplitude;
+            scale = 1.0 + (wave * 0.10);
+          }
+
+          const progress = Math.max(0, Math.min(1, elapsed / wordDuration));
+
+          return (
+            <span key={wordIndex} style={{ 
+              position: 'relative', display: 'inline-block', marginRight: '0.25em', 
+              transform: `translate3d(0, ${ty}px, 0) scale(${scale})`,
+              transition: 'none', willChange: 'transform' 
+            }}>
+              <span style={{ color: fontColor }}>{w.word}</span>
+              <span style={{ 
+                position: 'absolute', top: 0, left: 0, width: `${progress * 100}%`, overflow: 'hidden', 
+                color: highlightColor, whiteSpace: 'nowrap', transition: 'none'
+              }}>
+                {w.word}
+              </span>
+            </span>
+          );
+        } else {
+          const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
+
+          return (
+            <span key={wordIndex} style={{ display: 'inline-block', marginRight: '0.25em' }}>
+              {w.graphemes.map((seg, gIdx) => {
+                const gCenter = (gIdx + 0.5) / w.count;
+                const distance = activeProgress - gCenter;
+                let wave = 0;
+                if (Math.abs(distance) < waveWidth) {
+                  const phase = (distance / waveWidth) * (Math.PI / 2);
+                  if (waveShape === 'Sine') wave = Math.pow(Math.cos(phase), waveFalloff);
+                  else if (waveShape === 'Spring') wave = Math.pow(Math.max(0, Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.8)), 1.2);
+                  else if (waveShape === 'Pulse') wave = Math.pow(Math.cos(phase), waveFalloff * 3);
+                }
+
+                const ty = wave * -waveAmplitude;
+                const ts = 1.0 + (wave * 0.10);
+                const isHighlighted = (currentTime - wordStartTime) / wordDuration >= gCenter;
+
+                return (
+                  <span key={gIdx} style={{ 
+                    display: 'inline-block', 
+                    transform: `translate3d(0, ${ty}px, 0) scale(${ts})`,
+                    color: isHighlighted ? highlightColor : fontColor,
+                    willChange: 'transform',
+                    transition: 'none'
+                  }}>
+                    {seg}
+                  </span>
+                );
+              })}
+            </span>
+          );
+        }
+      })}
+    </div>
   );
 });
 
@@ -289,6 +218,7 @@ function App() {
   const [waveAmplitude, setWaveAmplitude] = useState(15);
   const [waveSmoothness, setWaveSmoothness] = useState(0.4);
   const [waveWidth, setWaveWidth] = useState(0.6);
+  const [waveFalloff, setWaveFalloff] = useState(2.5);
   const [waveShape, setWaveShape] = useState('Sine');
   const [waveOffset, setWaveOffset] = useState(0);
   
@@ -300,7 +230,7 @@ function App() {
       const path = await window.electronAPI.selectVideo();
       if (path) {
         setVideoPath(path);
-        setVideoSrc(`local-resource://${path}`); 
+        setVideoSrc(`file://${path}`); 
         setRenderedVideoPath(null);
         setRenderedVideoSrc(null);
         analyzeAudioBeats(`file://${path}`);
@@ -719,12 +649,24 @@ function App() {
             </button>
           )}
           {renderedVideoSrc && (
-            <button 
-              onClick={() => { setRenderedVideoSrc(null); setRenderedVideoPath(null); }}
-              style={{ backgroundColor: '#ff9800', color: '#fff' }}
-            >
-              Return to Editor
-            </button>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={() => { setRenderedVideoSrc(null); setRenderedVideoPath(null); }}
+                style={{ backgroundColor: '#ff9800', color: '#fff' }}
+              >
+                Return to Editor
+              </button>
+              <button 
+                onClick={() => {
+                  setRenderedVideoSrc(null);
+                  setRenderedVideoPath(null);
+                  setTimeout(() => handleRenderPreview(), 100);
+                }}
+                style={{ backgroundColor: 'var(--primary)' }}
+              >
+                Re-Render Preview
+              </button>
+            </div>
           )}
         </div>
         
@@ -732,7 +674,7 @@ function App() {
           {videoSrc || renderedVideoSrc ? (
             <video 
               ref={videoRef}
-              src={renderedVideoSrc || ("file://" + videoSrc.replace("local-resource://", ""))} 
+              src={renderedVideoSrc || videoSrc} 
               controls 
               onTimeUpdate={handleTimeUpdate}
             />
@@ -756,11 +698,10 @@ function App() {
               waveAmplitude={waveAmplitude}
               waveSmoothness={waveSmoothness}
               waveWidth={waveWidth}
+              waveFalloff={waveFalloff}
               waveShape={waveShape}
               waveOffset={waveOffset}
               beatTimestamps={beatTimestamps}
-              isExporting={isExporting}
-              getGraphemeMeasurements={getGraphemeMeasurements}
             />
           )}
         </div>
@@ -810,25 +751,26 @@ function App() {
 
           {animationStyle === 'Karaoke Wave' && (() => {
             const WAVE_PRESETS = [
-              { name: '1. Heavenly Float (Word)', target: 'Word', amp: 10, smooth: 1.0, width: 0.6, shape: 'Sine', offset: 0 },
-              { name: '2. Soft Ripple (Word)', target: 'Word', amp: 20, smooth: 0.6, width: 0.6, shape: 'Sine', offset: 0 },
-              { name: '3. Standard Pop (Word)', target: 'Word', amp: 30, smooth: 0.3, width: 0.6, shape: 'Sine', offset: 0 },
-              { name: '4. Hardcore Stomp (Word)', target: 'Word', amp: 50, smooth: 0.1, width: 0.6, shape: 'Sine', offset: 0 },
-              { name: '5. Harmonic Swell (Letter)', target: 'Letter', amp: 15, smooth: 0.4, width: 0.8, shape: 'Sine', offset: 0 },
-              { name: '6. Elastic Bounce (Letter)', target: 'Letter', amp: 20, smooth: 0.4, width: 0.5, shape: 'Spring', offset: 100 },
-              { name: '7. Soft Ripple (Letter)', target: 'Letter', amp: 12, smooth: 0.4, width: 0.4, shape: 'Sine', offset: 0 },
-              { name: '8. Sharp Pulse (Letter)', target: 'Letter', amp: 25, smooth: 0.4, width: 0.2, shape: 'Pulse', offset: 50 },
-              { name: '9. Delayed Wave (Letter)', target: 'Letter', amp: 18, smooth: 0.4, width: 0.6, shape: 'Sine', offset: -150 },
-              
-              // High-Width Smooth Letter Presets
-              { name: '10. Liquid River (Letter)', target: 'Letter', amp: 15, smooth: 0.5, width: 1.2, shape: 'Sine', offset: 0 },
-              { name: '11. Tidal Swell (Letter)', target: 'Letter', amp: 25, smooth: 0.6, width: 1.5, shape: 'Sine', offset: 0 },
-              { name: '12. Gentle Sea (Letter)', target: 'Letter', amp: 10, smooth: 0.4, width: 1.0, shape: 'Sine', offset: 0 },
-              { name: '13. Floating Cloud (Letter)', target: 'Letter', amp: 8, smooth: 0.8, width: 1.8, shape: 'Sine', offset: 0 },
-              { name: '14. Ocean Wave (Letter)', target: 'Letter', amp: 20, smooth: 0.5, width: 1.4, shape: 'Sine', offset: 50 }
+              { name: 'Liquid Letter (Ultra)', target: 'Letter', amp: 15, smooth: 0.5, width: 1.2, shape: 'Sine', offset: 0, falloff: 1.2 },
+              { name: 'Heavenly Float (Word)', target: 'Word', amp: 10, smooth: 1.0, width: 0.6, shape: 'Sine', offset: 0, falloff: 2.5 },
+              { name: 'Soft Ripple (Letter)', target: 'Letter', amp: 12, smooth: 0.4, width: 0.4, shape: 'Sine', offset: 0, falloff: 2.0 },
+              { name: 'Sharp Pulse (Letter)', target: 'Letter', amp: 25, smooth: 0.4, width: 0.2, shape: 'Pulse', offset: 50, falloff: 6.0 },
+              { name: 'Elastic Bounce (Letter)', target: 'Letter', amp: 20, smooth: 0.4, width: 0.5, shape: 'Spring', offset: 100, falloff: 2.0 },
+              { name: 'Tidal Swell (Wide)', target: 'Letter', amp: 25, smooth: 0.6, width: 1.8, shape: 'Sine', offset: 0, falloff: 1.0 },
+              { name: 'Ocean Wave (Delayed)', target: 'Letter', amp: 20, smooth: 0.5, width: 1.4, shape: 'Sine', offset: -100, falloff: 1.5 }
             ];
             
-            const currentPresetName = WAVE_PRESETS.find(p => p.target === waveTarget && p.amp === waveAmplitude && p.smooth === waveSmoothness && p.width === waveWidth && p.shape === waveShape && p.offset === waveOffset)?.name || 'Custom';
+            const currentPresetName = WAVE_PRESETS.find(p => p.target === waveTarget && p.amp === waveAmplitude && p.smooth === waveSmoothness && p.width === waveWidth && p.shape === waveShape && p.offset === waveOffset && (p.falloff === waveFalloff || !p.falloff))?.name || 'Custom';
+
+            const applyPreset = (p) => {
+              setWaveTarget(p.target);
+              setWaveAmplitude(p.amp);
+              setWaveSmoothness(p.smooth);
+              setWaveWidth(p.width);
+              setWaveShape(p.shape);
+              setWaveOffset(p.offset);
+              if (p.falloff) setWaveFalloff(p.falloff);
+            };
 
             return (
               <div style={{ padding: '10px', backgroundColor: '#333', borderRadius: '5px', marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -838,14 +780,7 @@ function App() {
                   <label style={{ width: '80px', fontSize: '12px', color: '#00e5ff' }}>Preset:</label>
                   <select style={{ flex: 1, padding: '3px', fontSize: '12px' }} value={currentPresetName} onChange={e => {
                     const p = WAVE_PRESETS.find(pr => pr.name === e.target.value);
-                    if (p) {
-                      setWaveTarget(p.target);
-                      setWaveAmplitude(p.amp);
-                      setWaveSmoothness(p.smooth);
-                      setWaveWidth(p.width);
-                      setWaveShape(p.shape);
-                      setWaveOffset(p.offset);
-                    }
+                    if (p) applyPreset(p);
                   }}>
                     <option value="Custom">-- Custom --</option>
                     {WAVE_PRESETS.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -881,6 +816,11 @@ function App() {
                       <label style={{ width: '80px', fontSize: '12px' }}>Wave Offset:</label>
                       <input type="range" min="-500" max="500" step="50" value={waveOffset} onChange={e => setWaveOffset(Number(e.target.value))} style={{ flex: 1 }} />
                       <span style={{ fontSize: '12px', width: '30px' }}>{waveOffset}ms</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '12px', width: '80px' }}>Falloff:</span>
+                      <input type="range" min="0.5" max="8.0" step="0.5" value={waveFalloff} onChange={e => setWaveFalloff(Number(e.target.value))} style={{ flex: 1 }} />
+                      <span style={{ fontSize: '12px', width: '30px' }}>{waveFalloff}</span>
                     </div>
                   </>
                 )}

@@ -132,7 +132,10 @@ function App() {
     const activeIdx = lyrics.findIndex((l, idx) => {
       const nextLyric = lyrics[idx + 1];
       const start = l.startTime !== null ? l.startTime : -1;
-      const end = l.endTime !== null ? l.endTime : (nextLyric && nextLyric.startTime !== null ? nextLyric.startTime : 999999);
+      let end = nextLyric && nextLyric.startTime !== null ? nextLyric.startTime : 999999;
+      if (l.endTime !== null && l.endTime + 1 < end) {
+        end = l.endTime + 1; // Stay on screen for 1 second after sweep ends, then clear
+      }
       return time >= start && time < end;
     });
     setActiveLyricIndex(activeIdx);
@@ -174,7 +177,10 @@ function App() {
         const activeIdx = lyrics.findIndex((l, idx) => {
           const nextLyric = lyrics[idx + 1];
           const start = l.startTime !== null ? l.startTime : -1;
-          const end = l.endTime !== null ? l.endTime : (nextLyric && nextLyric.startTime !== null ? nextLyric.startTime : 999999);
+          let end = nextLyric && nextLyric.startTime !== null ? nextLyric.startTime : 999999;
+          if (l.endTime !== null && l.endTime + 1 < end) {
+            end = l.endTime + 1;
+          }
           return time >= start && time < end;
         });
         setActiveLyricIndex(activeIdx);
@@ -391,7 +397,12 @@ function App() {
                 if (animationStyle === 'None') return <span style={{ color: fontColor }}>{lyric.text}</span>;
 
                 const text = lyric.text;
-                const duration = (lyric.endTime !== null ? lyric.endTime : lyric.startTime + 5) - lyric.startTime;
+                let duration = 5;
+                if (lyric.endTime !== null) {
+                  duration = lyric.endTime - lyric.startTime;
+                } else if (lyrics[activeLyricIndex + 1] && lyrics[activeLyricIndex + 1].startTime !== null) {
+                  duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
+                }
                 
                 const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
                 const totalChars = Array.from(segmenter.segment(text)).length;
@@ -541,7 +552,14 @@ function App() {
                   style={{ padding: '4px 8px', fontSize: '12px' }} 
                   onClick={() => updateLyricTime(idx, 'startTime')}
                 >
-                  {lyric.startTime !== null ? lyric.startTime.toFixed(1) : 'Set'}
+                  {lyric.startTime !== null ? lyric.startTime.toFixed(1) : 'Start'}
+                </button>
+                <button 
+                  title="Set exact end time to current video time"
+                  style={{ padding: '4px 8px', fontSize: '12px', backgroundColor: '#9C27B0' }} 
+                  onClick={() => updateLyricTime(idx, 'endTime')}
+                >
+                  {lyric.endTime !== null ? lyric.endTime.toFixed(1) : 'End'}
                 </button>
                 <button 
                   title="Shift all lyrics so this line starts at current video time"

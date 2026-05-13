@@ -17,156 +17,174 @@ const LyricsOverlay = React.memo(({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || activeLyricIndex === -1) return;
-    const ctx = canvas.getContext('2d', { alpha: true });
-    const lyric = lyrics[activeLyricIndex];
-    if (!lyric) return;
-
-    // Set canvas resolution to match container (Retina/M2 High-DPI support)
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-
-    const text = lyric.text;
-    const words = text.split(' ');
     
-    // Calculate Timing
-    let duration = 5;
-    if (lyric.endTime !== null) {
-      duration = lyric.endTime - lyric.startTime;
-    } else if (lyrics[activeLyricIndex + 1]?.startTime) {
-      duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
-    }
-    
-    const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
-    const totalChars = Array.from(segmenter.segment(text)).length;
-    const charDuration = duration / (totalChars || 1);
+    try {
+      const ctx = canvas.getContext('2d', { alpha: true });
+      const lyric = lyrics[activeLyricIndex];
+      if (!lyric) return;
 
-    ctx.clearRect(0, 0, rect.width, rect.height);
-    ctx.font = `${fontSize}px "${fontFamily}"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    const fullWidth = ctx.measureText(text).width;
-    let startX = (rect.width - fullWidth) / 2;
-    const centerY = rect.height / 2;
-
-    let charAccumulator = 0;
-
-    words.forEach((word, wordIndex) => {
-      const wordChars = Array.from(segmenter.segment(word)).length;
-      const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
-      const wordDuration = wordChars * charDuration;
-      const wordWidth = ctx.measureText(word).width;
+      // Set canvas resolution to match container (Retina/M2 High-DPI support)
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
       
-      charAccumulator += wordChars + 1;
+      // Safety: If rect is not ready, don't draw
+      if (rect.width <= 0 || rect.height <= 0) return;
 
-      // Calculate Wave & Pop
-      let scale = 1.0;
-      let globalTranslateY = 0;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      
+      // Reset transform and scale properly
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
-        let closestSpike = -1;
-        for (let i = beatTimestamps.length - 1; i >= 0; i--) {
-          if (beatTimestamps[i] <= currentTime) { closestSpike = beatTimestamps[i]; break; }
-        }
-        if (closestSpike !== -1) {
-          const elapsed = currentTime - closestSpike;
-          if (elapsed < 0.25) scale = 1.0 + (0.25 * Math.pow(1.0 - (elapsed / 0.25), 2));
-        }
+      const text = lyric.text;
+      const words = text.split(' ');
+      
+      // Calculate Timing
+      let duration = 5;
+      if (lyric.endTime !== null) {
+        duration = lyric.endTime - lyric.startTime;
+      } else if (lyrics[activeLyricIndex + 1]?.startTime) {
+        duration = lyrics[activeLyricIndex + 1].startTime - lyric.startTime;
       }
+      
+      const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
+      const totalChars = Array.from(segmenter.segment(text)).length;
+      const charDuration = duration / (totalChars || 1);
 
-      if (animationStyle === 'Karaoke Wave' && waveTarget === 'Word') {
-        const elapsed = currentTime - wordStartTime;
-        if (elapsed >= 0 && elapsed < waveSmoothness) {
-          const wave = Math.pow(Math.sin((elapsed / waveSmoothness) * Math.PI), 1.5);
-          globalTranslateY = wave * -waveAmplitude;
-          scale = 1.0 + (wave * 0.10);
-        }
-      }
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.font = `${fontSize}px "${fontFamily}"`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
 
-      if (waveTarget === 'Word' || animationStyle !== 'Karaoke Wave') {
-        // Draw Word (Simple Path)
-        ctx.save();
-        ctx.translate(startX + wordWidth / 2, centerY + globalTranslateY);
-        ctx.scale(scale, scale);
+      const fullWidth = ctx.measureText(text).width;
+      let startX = (rect.width - fullWidth) / 2;
+      const centerY = rect.height / 2;
+
+      let charAccumulator = 0;
+
+      words.forEach((word, wordIndex) => {
+        const wordChars = Array.from(segmenter.segment(word)).length;
+        const wordStartTime = lyric.startTime + (charAccumulator * charDuration);
+        const wordDuration = Math.max(0.01, wordChars * charDuration); // Avoid div by zero
+        const wordWidth = ctx.measureText(word).width;
         
-        // Draw Base
-        ctx.fillStyle = fontColor;
-        ctx.fillText(word, 0, 0);
+        charAccumulator += wordChars + 1;
 
-        // Draw Highlight
-        const elapsed = currentTime - wordStartTime;
-        const progress = Math.max(0, Math.min(1, elapsed / wordDuration));
-        if (progress > 0) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(-wordWidth / 2, -fontSize, wordWidth * progress, fontSize * 2);
-          ctx.clip();
-          ctx.fillStyle = highlightColor;
-          ctx.fillText(word, 0, 0);
-          ctx.restore();
+        // Calculate Wave & Pop
+        let scale = 1.0;
+        let globalTranslateY = 0;
+
+        if (animationStyle === 'Karaoke Pop' && currentTime >= wordStartTime && currentTime <= wordStartTime + wordDuration) {
+          let closestSpike = -1;
+          for (let i = beatTimestamps.length - 1; i >= 0; i--) {
+            if (beatTimestamps[i] <= currentTime) { closestSpike = beatTimestamps[i]; break; }
+          }
+          if (closestSpike !== -1) {
+            const elapsed = currentTime - closestSpike;
+            if (elapsed < 0.25) scale = 1.0 + (0.25 * Math.pow(1.0 - (elapsed / 0.25), 2));
+          }
         }
-        ctx.restore();
-      } else {
-        // GPU-Optimized Letter-by-Letter Grapheme Slicing
-        const graphemes = getGraphemeMeasurements(word);
-        const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
 
-        // Draw entire word to offscreen buffer once per word to keep ligatures perfect
-        const off = offscreenRef.current;
-        const offCtx = off.getContext('2d');
-        off.width = wordWidth * dpr;
-        off.height = fontSize * 2 * dpr;
-        offCtx.scale(dpr, dpr);
-        offCtx.font = `${fontSize}px "${fontFamily}"`;
-        offCtx.textBaseline = 'middle';
-
-        graphemes.forEach((g, gIdx) => {
-          const gCenter = ((g.leftPercent + g.rightPercent) / 2) / 100;
-          const distance = activeProgress - gCenter;
-          let wave = 0;
-          if (Math.abs(distance) < waveWidth) {
-            const phase = (distance / waveWidth) * (Math.PI / 2);
-            if (waveShape === 'Sine') wave = Math.pow(Math.cos(phase), 2.5);
-            else if (waveShape === 'Spring') wave = Math.pow(Math.max(0, Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.8)), 1.2);
-            else if (waveShape === 'Pulse') wave = Math.pow(Math.cos(phase), 8);
+        if (animationStyle === 'Karaoke Wave' && waveTarget === 'Word') {
+          const elapsed = currentTime - wordStartTime;
+          if (elapsed >= 0 && elapsed < waveSmoothness) {
+            const wave = Math.pow(Math.sin((elapsed / waveSmoothness) * Math.PI), 1.5);
+            globalTranslateY = wave * -waveAmplitude;
+            scale = 1.0 + (wave * 0.10);
           }
+        }
 
-          const ty = wave * -waveAmplitude;
-          const ts = 1.0 + (wave * 0.10);
-          const colorProgress = (currentTime - wordStartTime) / wordDuration;
-          const color = colorProgress >= gCenter ? highlightColor : fontColor;
-
+        if (waveTarget === 'Word' || animationStyle !== 'Karaoke Wave') {
+          // Draw Word (Simple Path)
           ctx.save();
-          const gX = startX + (g.leftPercent / 100) * wordWidth;
-          const gW = ((g.rightPercent - g.leftPercent) / 100) * wordWidth;
+          ctx.translate(startX + wordWidth / 2, centerY + globalTranslateY);
+          ctx.scale(scale, scale);
           
-          ctx.translate(gX + gW / 2, centerY + ty);
-          ctx.scale(ts, ts);
-          
-          // Draw the sliced grapheme from the offscreen buffer (Ultra Fast GPU Draw)
-          // We use the word as the source to keep Tamil ligatures intact
-          ctx.fillStyle = color;
-          if (wave > 0.1) {
-            ctx.shadowBlur = wave * 10;
-            ctx.shadowColor = highlightColor;
+          // Draw Base
+          ctx.fillStyle = fontColor;
+          ctx.fillText(word, 0, 0);
+
+          // Draw Highlight
+          const elapsed = currentTime - wordStartTime;
+          const progress = Math.max(0, Math.min(1, elapsed / wordDuration));
+          if (progress > 0) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(-wordWidth / 2, -fontSize, wordWidth * progress, fontSize * 2);
+            ctx.clip();
+            ctx.fillStyle = highlightColor;
+            ctx.fillText(word, 0, 0);
+            ctx.restore();
           }
-
-          // Clip to the grapheme's horizontal bounds
-          ctx.beginPath();
-          ctx.rect(-gW/2, -fontSize, gW, fontSize*2);
-          ctx.clip();
-          
-          // Render text relative to the grapheme center
-          ctx.fillText(word, (wordWidth / 2) - (g.leftPercent / 100 * wordWidth) - (gW / 2) - (wordWidth / 2), 0);
           ctx.restore();
-        });
-      }
+        } else {
+          // GPU-Optimized Letter-by-Letter Grapheme Slicing
+          const graphemes = getGraphemeMeasurements(word);
+          const activeProgress = ((currentTime + (waveOffset / 1000)) - wordStartTime) / wordDuration;
 
-      startX += wordWidth + ctx.measureText(' ').width;
-    });
+          // Draw entire word to offscreen buffer once per word to keep ligatures perfect
+          const off = offscreenRef.current;
+          const offCtx = off.getContext('2d');
+          
+          // Only resize if needed to save performance
+          const targetW = Math.max(1, wordWidth * dpr);
+          const targetH = Math.max(1, fontSize * 2 * dpr);
+          if (off.width !== targetW || off.height !== targetH) {
+            off.width = targetW;
+            off.height = targetH;
+          }
+          
+          offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          offCtx.clearRect(0, 0, wordWidth, fontSize * 2);
+          offCtx.font = `${fontSize}px "${fontFamily}"`;
+          offCtx.textBaseline = 'middle';
+          offCtx.textAlign = 'left';
+
+          graphemes.forEach((g, gIdx) => {
+            const gCenter = ((g.leftPercent + g.rightPercent) / 2) / 100;
+            const distance = activeProgress - gCenter;
+            let wave = 0;
+            if (Math.abs(distance) < waveWidth) {
+              const phase = (distance / waveWidth) * (Math.PI / 2);
+              if (waveShape === 'Sine') wave = Math.pow(Math.cos(phase), 2.5);
+              else if (waveShape === 'Spring') wave = Math.pow(Math.max(0, Math.cos(phase) * Math.exp(-Math.abs(phase) * 1.8)), 1.2);
+              else if (waveShape === 'Pulse') wave = Math.pow(Math.cos(phase), 8);
+            }
+
+            const ty = wave * -waveAmplitude;
+            const ts = 1.0 + (wave * 0.10);
+            const colorProgress = (currentTime - wordStartTime) / wordDuration;
+            const color = colorProgress >= gCenter ? highlightColor : fontColor;
+
+            ctx.save();
+            const gX = startX + (g.leftPercent / 100) * wordWidth;
+            const gW = ((g.rightPercent - g.leftPercent) / 100) * wordWidth;
+            
+            ctx.translate(gX + gW / 2, centerY + ty);
+            ctx.scale(ts, ts);
+            
+            ctx.fillStyle = color;
+            if (wave > 0.1) {
+              ctx.shadowBlur = wave * 10;
+              ctx.shadowColor = highlightColor;
+            }
+
+            // Clip to the grapheme's horizontal bounds
+            ctx.beginPath();
+            ctx.rect(-gW/2, -fontSize, gW, fontSize*2);
+            ctx.clip();
+            
+            // Draw relative to grapheme center
+            ctx.fillText(word, - (g.leftPercent / 100 * wordWidth) - (gW / 2), 0);
+            ctx.restore();
+          });
+        }
+
+        startX += wordWidth + ctx.measureText(' ').width;
+      });
+    } catch (err) {
+      console.error("Canvas draw error:", err);
+    }
   }, [currentTime, activeLyricIndex, lyrics, fontFamily, fontSize, fontColor, highlightColor, animationStyle, waveTarget, waveAmplitude, waveSmoothness, waveWidth, waveShape, waveOffset]);
 
   return (

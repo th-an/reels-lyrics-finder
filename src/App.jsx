@@ -30,10 +30,11 @@ function App() {
   const [fontColor, setFontColor] = useState('#ffffff');
   const [highlightColor, setHighlightColor] = useState('#ffff00');
   const [placement, setPlacement] = useState('pos-bottom'); 
-  const [animationStyle, setAnimationStyle] = useState('Karaoke Pop');
+  const [animationStyle, setAnimationStyle] = useState('Karaoke Wave');
   const [exportFps, setExportFps] = useState(60);
   
   const videoRef = useRef(null);
+  const measureCache = useRef({});
 
   const handleSelectVideo = async () => {
     if (window.electronAPI) {
@@ -92,6 +93,56 @@ function App() {
       console.error("Audio analysis failed:", e);
     }
     setIsAnalyzingAudio(false);
+  };
+
+  const getGraphemeMeasurements = (word) => {
+    const cacheKey = `${word}_${fontFamily}`;
+    if (measureCache.current[cacheKey]) return measureCache.current[cacheKey];
+
+    const div = document.createElement('div');
+    div.style.fontFamily = fontFamily;
+    div.style.fontSize = '100px'; 
+    div.style.position = 'absolute';
+    div.style.visibility = 'hidden';
+    div.style.whiteSpace = 'nowrap';
+    div.textContent = word;
+    document.body.appendChild(div);
+
+    const segmenter = new Intl.Segmenter('ta', { granularity: 'grapheme' });
+    const segments = Array.from(segmenter.segment(word));
+    
+    const textNode = div.firstChild;
+    const range = document.createRange();
+    const wordRect = div.getBoundingClientRect();
+    const graphemes = [];
+
+    let currentIndex = 0;
+    for (const seg of segments) {
+      try {
+        range.setStart(textNode, currentIndex);
+        range.setEnd(textNode, currentIndex + seg.segment.length);
+        const rect = range.getBoundingClientRect();
+        
+        let lPercent = ((rect.left - wordRect.left) / wordRect.width) * 100;
+        let rPercent = ((rect.right - wordRect.left) / wordRect.width) * 100;
+        
+        lPercent = Math.max(0, Math.min(100, lPercent));
+        rPercent = Math.max(0, Math.min(100, rPercent));
+
+        graphemes.push({
+          text: seg.segment,
+          leftPercent: lPercent,
+          rightPercent: rPercent,
+        });
+      } catch (e) {
+        graphemes.push({ text: seg.segment, leftPercent: 0, rightPercent: 100 });
+      }
+      currentIndex += seg.segment.length;
+    }
+
+    document.body.removeChild(div);
+    measureCache.current[cacheKey] = graphemes;
+    return graphemes;
   };
 
   const handleSearchLyrics = async () => {
@@ -496,6 +547,45 @@ function App() {
                     }
                   }
 
+                  if (animationStyle === 'Karaoke Wave') {
+                    const graphemes = getGraphemeMeasurements(word);
+                    return (
+                      <React.Fragment key={wordIndex}>
+                        <span style={{ position: 'relative', display: 'inline-block' }}>
+                          <span style={{ color: 'transparent' }}>{word}</span>
+                          {graphemes.map((g, gIdx) => {
+                            const gStartTime = wordStartTime + ((gIdx / graphemes.length) * wordDuration);
+                            let translateY = 0;
+                            let color = fontColor;
+                            
+                            if (currentTime >= gStartTime) {
+                                color = highlightColor;
+                                const elapsed = currentTime - gStartTime;
+                                if (elapsed < 0.25) {
+                                    const progress = elapsed / 0.25;
+                                    translateY = Math.sin(progress * Math.PI) * -15; 
+                                }
+                            }
+                            
+                            return (
+                              <span key={gIdx} style={{
+                                position: 'absolute', top: 0, left: 0, bottom: 0, right: 0,
+                                color: color,
+                                WebkitMaskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
+                                maskImage: `linear-gradient(to right, transparent ${g.leftPercent}%, black ${g.leftPercent}%, black ${g.rightPercent}%, transparent ${g.rightPercent}%)`,
+                                transform: `translateY(${translateY}px)`,
+                                transition: isExporting ? 'none' : 'transform 0.05s linear, color 0.05s'
+                              }}>
+                                {word}
+                              </span>
+                            );
+                          })}
+                        </span>
+                        {wordIndex < words.length - 1 && <span> </span>}
+                      </React.Fragment>
+                    );
+                  }
+
                   return (
                     <React.Fragment key={wordIndex}>
                       <span style={{ 
@@ -567,6 +657,7 @@ function App() {
               <option value="None">None</option>
               <option value="Karaoke">Karaoke (Highlight)</option>
               <option value="Karaoke Pop">Karaoke Pop (Beat Reactive)</option>
+              <option value="Karaoke Wave">Karaoke Wave (Letter Jump)</option>
             </select>
           </div>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
